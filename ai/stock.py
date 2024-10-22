@@ -3,8 +3,22 @@ import psycopg2,sys
 import pandas as pd
 
 # Ticker symbol for Alphabet Inc. (Google) is 'GOOGL'
+
+def db_sqlalchemy():
+    db_host = "localhost"
+    db_port = "5432"
+    db_name = ""
+    db_user = "postgres"
+    db_password = ""
+    
+    from sqlalchemy import create_engine
+    #conn = create_engine('postgresql+psycopg2://postgres:@localhost:5432/')
+    connection_string = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+    conn = create_engine(connection_string)
+    return conn
+
 def db_connect():
-        # Database connection details
+    # Database connection details
     db_host = "localhost"
     db_port = "5432"
     db_name = ""
@@ -98,6 +112,52 @@ def load_ticker(ticker='GOOGL',drop_and_recreate=0):
 
 # The standard boilerplate to call the main() function
 
+def predict_linear_reg(ticker=None):
+    import pandas as pd
+    import yfinance as yf
+    import tensorflow as tf
+    from sklearn.model_selection import train_test_split
+
+    # Load historical stock data for Google (Alphabet Inc.)
+    ticker = ticker
+    #data = yf.download(ticker, start='2010-01-01', end='2024-10-20')
+
+    query = "SELECT close as \"Close\" FROM stock where ticker='%s' order by date ;"%ticker
+    print(query)
+    # Step 3: Read the SQL query results into a Pandas DataFrame
+    conn=db_sqlalchemy()
+    data = pd.read_sql_query(query, conn)
+
+    data = data[['Close']]
+    data.reset_index(inplace=True)
+
+    # Create features and labels
+    data['Prev Close'] = data['Close'].shift(1)
+    data.dropna(inplace=True)
+    X = data[['Prev Close']].values  # Features
+    y = data['Close'].values          # Labels
+
+    # Split the data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Build the model
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(1, input_shape=(1,))  # 1 input feature
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+
+    # Train the model
+    model.fit(X_train, y_train, epochs=100, verbose=0)
+
+    # Evaluate the model
+    loss = model.evaluate(X_test, y_test)
+    print(f'Model Loss: {loss}')
+
+    # Make predictions
+    predictions = model.predict(X_test)
+    results = pd.DataFrame({'Actual': y_test, 'Predicted': predictions.flatten()})
+    print(results.head())
+
 def predict_stock(ticker=None):
     import numpy as np
     import pandas as pd
@@ -108,16 +168,18 @@ def predict_stock(ticker=None):
 
     # Step 1: Load the dataset
     # Step 2: Write the SQL query
-    query = "SELECT * FROM stock where ticker='%s';"%ticker
+    query = "SELECT close FROM stock where ticker='%s' order by date ;"%ticker
+    print(query)
     # Step 3: Read the SQL query results into a Pandas DataFrame
-    conn=db_connect()
+    conn=db_sqlalchemy()
     data = pd.read_sql_query(query, conn)
-
+    print(data.shape)
+    print(len(data))
     #data = pd.read_csv('GOOGL_stock_data.csv')  # Replace with the correct path to your dataset
 
     # Step 2: Preprocess the data (Normalize the data)
     # We will use only the 'Close' price for simplicity
-    data = data['Close'].values
+    data = data['close'].values
     data = data.reshape(-1, 1)
 
     # Normalize the data to be between 0 and 1
@@ -142,8 +204,8 @@ def predict_stock(ticker=None):
     X_test, y_test = create_sequences(test_data, time_step)
 
     # Reshape data to be [samples, time steps, features] which is required for LSTM
-    X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
-    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
+    #X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
+    #X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
     # Step 4: Build the LSTM model
     model = Sequential()
@@ -161,7 +223,7 @@ def predict_stock(ticker=None):
     # Step 6: Make predictions
     train_predict = model.predict(X_train)
     test_predict = model.predict(X_test)
-
+    return
     # Invert the scaling to get actual prices
     train_predict = scaler.inverse_transform(train_predict)
     test_predict = scaler.inverse_transform(test_predict)
@@ -192,12 +254,16 @@ def predict_stock(ticker=None):
 
 def main():
     try:
-        for ticker in ['NVDA','GOOG']:  
+        for ticker in ['GOOG']:  
 
             #load_ticker(ticker=ticker)
-             predict_stock(ticker=ticker)
+            #predict_stock(ticker=ticker)
+            predict_linear_reg(ticker=ticker)
+
         #delta_change_ticker(t)
     except Exception as ex:
+        import traceback
+        print(traceback.print_exc())
         print(str(ex))
 
 if __name__ == "__main__":
